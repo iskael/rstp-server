@@ -1,0 +1,49 @@
+<div class="grid">
+  <div>
+    <label>Nombre</label>
+    <input type="text" name="name" required value="{{ cam.name if cam else '' }}">
+  </div>
+  <div style="grid-column: span 2;">
+    <label>RTSP URL</label>
+    <input type="text" name="rtsp_url" required
+           placeholder="rtsp://usuario:pass@192.168.1.10:554/stream1"
+           value="{{ cam.rtsp_url if cam else '' }}">
+  </div>
+  <div>
+    <label>Puerto HTTP</label>
+    <input type="number" name="http_port" min="1024" max="65535" required
+           value="{{ cam.http_port if cam else '' }}">
+  </div>
+  <div>
+    <label>FPS</label>
+    <input type="number" name="fps" min="1" max="60" value="{{ cam.fps if cam else 10 }}">
+  </div>
+  <div>
+    <label>Calidad JPEG (1=mejor, 31=peor)</label>
+    <input type="number" name="jpeg_quality" min="1" max="31"
+           value="{{ cam.jpeg_quality if cam else 5 }}">
+  </div>
+  <div>
+    <label>Ancho (opcional)</label>
+    <input type="number" name="width" min="16" max="7680"
+           value="{{ cam.width if cam and cam.width else '' }}">
+  </div>
+  <div>
+    <label>Alto (opcional)</label>
+    <input type="number" name="height" min="16" max="4320"
+           value="{{ cam.height if cam and cam.height else '' }}">
+  </div>
+  <div>
+    <label>Habilitada</label>
+    <input type="checkbox" name="enabled" {{ 'checked' if (cam is none or cam.enabled) else '' }}>
+  </div>
+  <div>
+    <label>Guardar capturas a disco</label>
+    <input type="checkbox" name="capture_enabled" {{ 'checked' if cam and cam.capture_enabled else '' }}>
+  </div>
+  <div>
+    <label>Intervalo capturas (s)</label>
+    <input type="number" name="capture_interval_secs" min="1" max="86400"
+           value="{{ cam.capture_interval_secs if cam else 60 }}">
+  </div>
+</div>

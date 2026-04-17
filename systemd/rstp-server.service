@@ -1,0 +1,27 @@
+[Unit]
+Description=rstp-server: RTSP to HTTP MJPEG re-streamer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rstp
+Group=rstp
+WorkingDirectory=/opt/rstp-server
+Environment=PYTHONUNBUFFERED=1
+Environment=LOG_LEVEL=INFO
+Environment=RSTP_DB=/opt/rstp-server/data/cameras.db
+ExecStart=/opt/rstp-server/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8080
+Restart=always
+RestartSec=3
+LimitNOFILE=65536
+
+# Hardening (deja capturas escribibles)
+NoNewPrivileges=yes
+ProtectSystem=full
+ReadWritePaths=/opt/rstp-server/data
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

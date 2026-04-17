@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>{% block title %}rstp-server{% endblock %}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" type="image/svg+xml" href="{{ request.url_for('static', path='favicon.svg') }}">
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+    :root {
+      --bg: #0f1115; --panel: #181b22; --panel2: #1f232c;
+      --fg: #e6e8ee; --muted: #9aa3b2; --accent: #4f9dff;
+      --ok: #44c281; --warn: #e0b341; --err: #ef5b5b; --line: #2a2f3a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg); color: var(--fg);
+    }
+    header {
+      padding: 14px 24px; background: var(--panel);
+      border-bottom: 1px solid var(--line); display: flex; align-items: center;
+      justify-content: space-between;
+    }
+    header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+    main { padding: 24px; width: min(100%, 1280px); margin: 0 auto; }
+    h2 { font-size: 16px; margin: 0 0 12px; color: var(--muted);
+         text-transform: uppercase; letter-spacing: .08em; font-weight: 600; }
+    .panel { background: var(--panel); border: 1px solid var(--line);
+             border-radius: 10px; padding: 18px; margin-bottom: 24px; overflow: clip; }
+    .table-wrap {
+      overflow-x: auto; overflow-y: hidden; max-width: 100%;
+      margin: 0 -4px; padding: 0 4px 6px;
+      scrollbar-width: thin; scrollbar-color: var(--line) transparent;
+    }
+    .table-wrap::-webkit-scrollbar { height: 10px; }
+    .table-wrap::-webkit-scrollbar-thumb {
+      background: var(--line); border-radius: 999px;
+    }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; min-width: 1080px; }
+    th, td { padding: 10px 8px; text-align: left; border-bottom: 1px solid var(--line);
+             font-size: 14px; vertical-align: middle; }
+    th { color: var(--muted); font-weight: 500; font-size: 12px;
+         text-transform: uppercase; letter-spacing: .05em; }
+    tr:last-child td { border-bottom: none; }
+    td { overflow-wrap: anywhere; }
+    col.col-id { width: 44px; }
+    col.col-preview { width: 220px; }
+    col.col-name { width: 32%; }
+    col.col-port { width: 70px; }
+    col.col-status { width: 180px; }
+    col.col-captures { width: 120px; }
+    col.col-urls { width: 260px; }
+    col.col-actions { width: 120px; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 999px;
+             font-size: 11px; font-weight: 600; text-transform: uppercase; }
+    .badge.running { background: rgba(68,194,129,.15); color: var(--ok); }
+    .badge.starting { background: rgba(224,179,65,.15); color: var(--warn); }
+    .badge.error { background: rgba(239,91,91,.15); color: var(--err); }
+    .badge.stopped { background: rgba(154,163,178,.15); color: var(--muted); }
+    .badge.disabled { background: rgba(154,163,178,.10); color: var(--muted); }
+    button, .btn {
+      background: var(--panel2); color: var(--fg); border: 1px solid var(--line);
+      padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px;
+      text-decoration: none; display: inline-block;
+    }
+    button:hover, .btn:hover { border-color: var(--accent); }
+    .btn-primary { background: var(--accent); color: white; border-color: var(--accent); }
+    .btn-danger { color: var(--err); }
+    form.inline { display: inline; }
+    label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+    input[type="text"], input[type="number"], input[type="url"] {
+      width: 100%; background: var(--bg); color: var(--fg);
+      border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px;
+      font-size: 14px; font-family: inherit;
+    }
+    input:focus { outline: none; border-color: var(--accent); }
+    .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+    .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    td.actions-cell { vertical-align: top; }
+    a { color: var(--accent); }
+    code { background: var(--panel2); padding: 2px 6px; border-radius: 4px;
+           font-size: 12px; color: var(--fg); }
+    .mono-block {
+      display: block; max-width: 100%;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .bar { background: var(--panel2); border-radius: 6px; overflow: hidden;
+           height: 14px; position: relative; border: 1px solid var(--line); }
+    .bar-fill { height: 100%; transition: width .3s ease; }
+    .bar-fill.ok { background: var(--ok); }
+    .bar-fill.warn { background: var(--warn); }
+    .bar-fill.err { background: var(--err); }
+    .muted { color: var(--muted); font-size: 13px; }
+    details summary { cursor: pointer; padding: 4px 0; }
+    .form-actions { margin-top: 14px; display: flex; gap: 8px; }
+    .url-list { display: grid; gap: 4px; margin-top: 6px; }
+    .url-row {
+      display: grid; grid-template-columns: 132px minmax(0, 1fr) auto auto;
+      gap: 6px; align-items: center;
+    }
+    .url-row .label { color: var(--muted); font-size: 11px;
+                       text-transform: uppercase; letter-spacing: .04em; }
+    .url-row .val {
+      background: var(--bg); border: 1px solid var(--line);
+      border-radius: 5px; padding: 4px 8px; font-family: ui-monospace,
+      SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--fg);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .copy-btn {
+      background: var(--panel2); border: 1px solid var(--line); color: var(--fg);
+      border-radius: 5px; padding: 4px 9px; font-size: 11px; cursor: pointer;
+      min-width: 52px;
+    }
+    .copy-btn:hover { border-color: var(--accent); }
+    .copy-btn.copied { background: var(--ok); border-color: var(--ok);
+                       color: white; }
+    .open-btn {
+      color: var(--accent); text-decoration: none; font-size: 11px;
+      padding: 4px 8px; border: 1px solid var(--line); border-radius: 5px;
+      min-width: 48px; text-align: center;
+    }
+    .open-btn:hover { border-color: var(--accent); }
+    .url-block { padding: 10px; background: var(--panel2);
+                  border: 1px solid var(--line); border-radius: 8px; }
+    .url-cell { position: relative; overflow: visible; }
+    .url-details { position: relative; }
+    .url-details summary {
+      list-style: none;
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px;
+      background: var(--panel2); color: var(--fg); font-size: 13px;
+      line-height: 1.2;
+    }
+    .url-details summary::-webkit-details-marker { display: none; }
+    .url-details summary::before {
+      content: "▸"; color: var(--muted); font-size: 12px; transition: transform .18s ease;
+    }
+    .url-details[open] summary::before { transform: rotate(90deg); }
+    .url-summary-text {
+      display: flex; flex-direction: column; gap: 2px; min-width: 0;
+    }
+    .url-summary-text strong { font-size: 12px; letter-spacing: .04em; text-transform: uppercase; }
+    .url-summary-text span {
+      color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      max-width: 240px;
+    }
+    .url-details[open] .url-block {
+      position: absolute; top: calc(100% + 8px); right: 0;
+      width: min(460px, 48vw); z-index: 20;
+      box-shadow: 0 18px 42px rgba(0,0,0,.35);
+    }
+    .preview {
+      width: 200px; height: 120px; background: var(--bg);
+      border: 1px solid var(--line); border-radius: 6px; overflow: hidden;
+      display: flex; align-items: center; justify-content: center;
+      position: relative;
+    }
+    .preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .preview .placeholder { color: var(--muted); font-size: 11px;
+                            text-align: center; padding: 6px; }
+    .preview .toggle {
+      position: absolute; bottom: 4px; right: 4px;
+      background: rgba(0,0,0,.55); color: white; border: none;
+      border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer;
+    }
+    @media (max-width: 720px) {
+      header { padding: 12px 16px; }
+      main { padding: 16px; }
+      .panel { padding: 14px; }
+      .grid { grid-template-columns: 1fr; }
+      .url-row { grid-template-columns: 1fr; }
+      .url-row .val { white-space: normal; }
+      .url-details { display: block; }
+      .url-details[open] .url-block {
+        position: static; width: 100%; margin-top: 8px;
+        box-shadow: none;
+      }
+      .url-summary-text span { max-width: none; }
+      .form-actions, .row-actions { align-items: stretch; }
+      button, .btn, .copy-btn, .open-btn { width: 100%; text-align: center; }
+      .preview { width: 168px; height: 102px; }
+    }
+  </style>
+  <script>
+    function togglePreview(camId, btn) {
+      const wrap = document.getElementById('prev-' + camId);
+      if (!wrap) return;
+      const url = wrap.dataset.stream;
+      const placeholder = wrap.querySelector('.placeholder');
+      let img = wrap.querySelector('img');
+      if (img) {
+        img.src = ''; img.remove();
+        if (placeholder) placeholder.style.display = '';
+        btn.textContent = '▶︎ ver';
+      } else {
+        img = document.createElement('img');
+        img.src = url + '?t=' + Date.now();
+        img.alt = 'preview';
+        if (placeholder) placeholder.style.display = 'none';
+        wrap.insertBefore(img, btn);
+        btn.textContent = '⏸ pausar';
+      }
+    }
+    async function copyText(text, btn) {
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch (_) {
+        const ta = document.createElement('textarea');
+        ta.value = text; document.body.appendChild(ta);
+        ta.select(); document.execCommand('copy'); ta.remove();
+      }
+      const old = btn.textContent;
+      btn.classList.add('copied'); btn.textContent = '✓ copiado';
+      setTimeout(() => { btn.classList.remove('copied'); btn.textContent = old; }, 1200);
+    }
+  </script>
+</head>
+<body>
+  <header>
+    <h1>rstp-server</h1>
+    <div class="muted">re-streamer RTSP → HTTP MJPEG</div>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

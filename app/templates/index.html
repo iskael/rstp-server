@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="panel">
+  <h2>Cámaras</h2>
+  <div class="table-wrap">
+  <table>
+    <colgroup>
+      <col class="col-id">
+      <col class="col-preview">
+      <col class="col-name">
+      <col class="col-port">
+      <col class="col-status">
+      <col class="col-captures">
+      <col class="col-urls">
+      <col class="col-actions">
+    </colgroup>
+    <thead>
+      <tr>
+        <th>#</th><th>Preview</th><th>Nombre</th><th>Puerto</th>
+        <th>Estado</th><th>Capturas</th><th>URLs</th><th>Acciones</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for cam in cameras %}
+      {% set st = statuses.get(cam.id) %}
+      {% set base = "http://" ~ request.url.hostname ~ ":" ~ cam.http_port %}
+      <tr>
+        <td>{{ cam.id }}</td>
+        <td>
+          <div class="preview" id="prev-{{ cam.id }}"
+               data-stream="{{ base }}/video_feed">
+            {% if cam.enabled %}
+              <span class="placeholder">click ▶︎ para ver</span>
+              <button type="button" class="toggle"
+                      onclick="togglePreview({{ cam.id }}, this)">▶︎ ver</button>
+            {% else %}
+              <span class="placeholder">deshabilitada</span>
+            {% endif %}
+          </div>
+        </td>
+        <td>
+          <strong>{{ cam.name }}</strong>
+          <div class="muted" style="margin-top:4px;">
+            <code class="mono-block" title="{{ cam.rtsp_url }}">{{ cam.rtsp_url }}</code>
+          </div>
+        </td>
+        <td><code>{{ cam.http_port }}</code></td>
+        <td>
+          {% if not cam.enabled %}
+            <span class="badge disabled">disabled</span>
+          {% elif st %}
+            <span class="badge {{ st.state }}">{{ st.state }}</span>
+            {% if st.frames_total %}
+              <div class="muted">{{ st.frames_total }} frames · {{ st.clients }} clientes</div>
+            {% endif %}
+            {% if st.last_error and st.state != 'running' %}
+              <div class="muted" style="color:var(--err);">{{ st.last_error }}</div>
+            {% endif %}
+          {% else %}
+            <span class="badge stopped">—</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if cam.capture_enabled %}
+            cada {{ cam.capture_interval_secs }}s
+          {% else %}
+            <span class="muted">off</span>
+          {% endif %}
+        </td>
+        <td class="url-cell">
+          <details class="url-details">
+            <summary>
+              <span class="url-summary-text">
+                <strong>Ver URLs</strong>
+                <span title="{{ base }}">{{ base }}</span>
+              </span>
+            </summary>
+            <div class="url-block url-list">
+              {% set urls = [
+                ('video_feed',  base ~ '/video_feed',         'stream'),
+                ('snapshot',    base ~ '/snapshot',           'jpg'),
+                ('action=stream',  base ~ '/?action=stream',  'stream'),
+                ('action=snapshot',base ~ '/?action=snapshot','jpg'),
+                ('stream.mjpg', base ~ '/stream.mjpg',        'stream'),
+                ('snapshot.jpg',base ~ '/snapshot.jpg',       'jpg'),
+              ] %}
+              {% for label, url, kind in urls %}
+                <div class="url-row">
+                  <span class="label">{{ label }}</span>
+                  <span class="val" title="{{ url }}">{{ url }}</span>
+                  <button type="button" class="copy-btn"
+                          onclick="copyText('{{ url }}', this)">Copiar</button>
+                  <a class="open-btn" href="{{ url }}" target="_blank">Abrir</a>
+                </div>
+              {% endfor %}
+            </div>
+          </details>
+        </td>
+        <td class="actions-cell">
+          <div class="row-actions">
+            <form class="inline" method="post" action="/cameras/{{ cam.id }}/toggle">
+              <button>{{ 'Pausar' if cam.enabled else 'Activar' }}</button>
+            </form>
+            <button onclick="document.getElementById('edit-{{ cam.id }}').open=true">Editar</button>
+            <form class="inline" method="post" action="/cameras/{{ cam.id }}/delete"
+                  onsubmit="return confirm('¿Eliminar cámara {{ cam.name }}?');">
+              <button class="btn-danger">Eliminar</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      <tr>
+        <td colspan="8" style="padding:0;border:none;">
+          <details id="edit-{{ cam.id }}">
+            <summary class="muted" style="padding:8px 8px;">Editar #{{ cam.id }}</summary>
+            <form method="post" action="/cameras/{{ cam.id }}/update" style="padding:12px 8px 18px;">
+              {% include "_camera_fields.html" %}
+              <div class="form-actions">
+                <button class="btn-primary">Guardar</button>
+              </div>
+            </form>
+          </details>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="muted">No hay cámaras registradas todavía.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Añadir cámara</h2>
+  <form method="post" action="/cameras">
+    {% set cam = none %}
+    {% include "_camera_fields.html" %}
+    <div class="form-actions">
+      <button class="btn-primary">Crear</button>
+    </div>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>Almacenamiento</h2>
+  {% set used = disk.used_pct %}
+  {% set high = disk.high_watermark_pct %}
+  {% set bar_class = 'err' if used >= high else ('warn' if used >= high * 0.85 else 'ok') %}
+  <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+    <div><strong>{{ disk.captures_dir }}</strong></div>
+    <div class="muted">{{ '%.2f' | format(used) }} % usado · alta {{ high }} % · baja {{ disk.low_watermark_pct }} %</div>
+  </div>
+  <div class="bar"><div class="bar-fill {{ bar_class }}" style="width: {{ used }}%;"></div></div>
+  <div class="muted" style="margin-top:6px;">
+    Total {{ (disk.total_bytes / 1073741824) | round(1) }} GB ·
+    Usado {{ (disk.used_bytes / 1073741824) | round(1) }} GB ·
+    Libre {{ (disk.free_bytes / 1073741824) | round(1) }} GB
+  </div>
+
+  {% if janitor %}
+  <div class="muted" style="margin-top:12px;">
+    Última pasada del janitor:
+    {% if janitor.purged %}
+      purgó <strong>{{ janitor.files_deleted }}</strong> ficheros
+      ({{ (janitor.bytes_freed / 1048576) | round(1) }} MB),
+      pasó de {{ '%.2f' | format(janitor.used_pct_before) }}% →
+      {{ '%.2f' | format(janitor.used_pct_after) }}%.
+    {% else %}
+      sin purga ({{ '%.2f' | format(janitor.used_pct_before) }}% < {{ high }}%).
+    {% endif %}
+    {% if janitor.error %}<span style="color:var(--err);">{{ janitor.error }}</span>{% endif %}
+  </div>
+  {% endif %}
+
+  <form method="post" action="/janitor/run" style="margin-top:14px;">
+    <button>Ejecutar janitor ahora</button>
+  </form>
+
+  <details style="margin-top:18px;">
+    <summary>Configuración</summary>
+    <form method="post" action="/settings" style="margin-top:12px;">
+      <div class="grid">
+        <div>
+          <label>Directorio de capturas</label>
+          <input type="text" name="captures_dir" value="{{ settings.captures_dir }}">
+        </div>
+        <div>
+          <label>Umbral alto (%)</label>
+          <input type="number" step="0.1" min="1" max="99" name="disk_high_watermark_pct"
+                 value="{{ settings.disk_high_watermark_pct }}">
+        </div>
+        <div>
+          <label>Umbral bajo (%)</label>
+          <input type="number" step="0.1" min="0" max="99" name="disk_low_watermark_pct"
+                 value="{{ settings.disk_low_watermark_pct }}">
+        </div>
+        <div>
+          <label>Intervalo del janitor (s)</label>
+          <input type="number" min="10" max="86400" name="janitor_interval_secs"
+                 value="{{ settings.janitor_interval_secs }}">
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn-primary">Guardar configuración</button>
+      </div>
+    </form>
+  </details>
+</section>
+
+{% endblock %}
