@@ -1,0 +1,23 @@
+{
+  "_comentario": [
+    "Copiar a data/printers.json y completar. data/ esta en .gitignore",
+    "porque este archivo lleva credenciales.",
+    "Cada clave es el nombre del stream en go2rtc.yaml, para que la",
+    "telemetria aparezca en el recuadro de la camara que corresponde."
+  ],
+
+  "bambu_x1": {
+    "type": "bambu",
+    "host": "192.168.0.223",
+    "serial": "SERIAL_DE_LA_IMPRESORA",
+    "code": "CODIGO_DE_ACCESO",
+    "label": "Bambu Lab H2S"
+  },
+
+  "eufy": {
+    "type": "octoprint",
+    "url": "http://192.168.0.196:5000",
+    "api_key": "API_KEY_DE_OCTOPRINT",
+    "label": "OctoPrint"
+  }
+}

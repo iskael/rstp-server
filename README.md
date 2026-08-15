@@ -205,7 +205,8 @@ El servicio actual usa:
 
 - `GET /api/cameras` — listado JSON de cámaras y estado.
 - `GET /api/disk` — uso del disco y último reporte del janitor.
-- `GET /api/wall` — estado de los streams de go2rtc para la vista mosaico.
+- `GET /api/wall` — estado de los streams de go2rtc y telemetría de las
+  impresoras, para la vista mosaico.
 - `POST /janitor/run` — ejecuta una pasada del janitor inmediatamente.
 
 ## Vista mosaico (todas las cámaras en una pantalla)
@@ -237,6 +238,33 @@ cualquier web abierta en el navegador leer esas credenciales. go2rtc solo acepta
 
 La URL de go2rtc se puede cambiar con la variable de entorno `GO2RTC_API`
 (por defecto `http://127.0.0.1:1984`).
+
+### Telemetría de impresión sobre cada cámara
+
+Cada recuadro puede mostrar el estado de la impresora que enfoca: nombre del
+trabajo, barra de avance, porcentaje, tiempo restante, hora estimada de término,
+capa actual y temperaturas.
+
+Se configura en `data/printers.json` (ver `printers.example.json`). Cada clave
+es el **nombre del stream en go2rtc**, y así la telemetría cae en el recuadro de
+la cámara correspondiente. Ese archivo vive en `data/` porque lleva credenciales
+y `data/` está en `.gitignore`.
+
+Orígenes soportados:
+
+- `"type": "bambu"` — MQTT sobre TLS contra la propia impresora (puerto 8883),
+  usuario `bblp` y contraseña = **código de acceso** de la pantalla. Requiere
+  modo *LAN Only*. Se mantiene una conexión abierta y se cachea el último
+  reporte; al conectar se pide un `pushall` para no esperar al siguiente evento.
+  El **serial** se puede leer del anuncio SSDP que la impresora emite a
+  `239.255.255.250:1990` (campo `USN`), escuchando en el puerto UDP `2021`.
+- `"type": "octoprint"` — API REST con cabecera `X-Api-Key`. La clave está en
+  `~/.octoprint/config.yaml`, bajo `api: key:`.
+
+Diferencia a tener en cuenta: **OctoPrint informa el tiempo transcurrido real y
+la Bambu no.** Para la Bambu, si se ve arrancar el trabajo se mide de verdad; si
+no, se estima a partir del avance y el restante asumiendo ritmo parejo. En la
+vista ese caso aparece con `~` delante para no dar por exacto algo que no lo es.
 
 ### Una sola conexión por cámara
 

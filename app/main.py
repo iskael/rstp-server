@@ -18,6 +18,7 @@ from fastapi.templating import Jinja2Templates
 from .janitor import DiskJanitor
 from .manager import CameraManager
 from .models import CameraIn, Settings
+from .printers import PrinterHub
 from .storage import Storage
 
 logging.basicConfig(
@@ -32,9 +33,13 @@ TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
+PRINTERS_CONFIG = os.environ.get(
+    "PRINTERS_CONFIG", str(Path(DB_PATH).parent / "printers.json"))
+
 storage = Storage(DB_PATH)
 manager = CameraManager(storage)
 janitor = DiskJanitor(settings_provider=storage.get_settings)
+printers = PrinterHub(PRINTERS_CONFIG)
 
 
 @asynccontextmanager
@@ -43,10 +48,12 @@ async def lifespan(app: FastAPI):
     Path(storage.get_settings().captures_dir).mkdir(parents=True, exist_ok=True)
     await manager.start_all()
     janitor.start()
+    printers.start()
     try:
         yield
     finally:
         log.info("stopping rstp-server")
+        printers.stop()
         await janitor.stop()
         await manager.stop_all()
         storage.close()
@@ -216,8 +223,11 @@ async def api_wall():
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"go2rtc no responde: {e}")
 
+    telemetry = await printers.snapshot()
+
     async def one(name: str) -> dict:
-        item = {"name": name, "connected": False, "bytes_recv": 0, "codec": None}
+        item = {"name": name, "connected": False, "bytes_recv": 0,
+                "codec": None, "printer": telemetry.get(name)}
         try:
             src = urllib.parse.quote(name, safe="")
             detail = await asyncio.to_thread(
