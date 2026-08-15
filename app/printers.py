@@ -34,6 +34,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import socket
 import ssl
 import time
 import urllib.error
@@ -42,6 +44,86 @@ from pathlib import Path
 from typing import Any, Optional
 
 log = logging.getLogger(__name__)
+
+# Campos que definen a cada proveedor. La UI se dibuja a partir de esto, así
+# que agregar un proveedor nuevo no obliga a tocar la plantilla.
+PROVIDERS: dict[str, dict] = {
+    "bambu": {
+        "label": "Bambu Lab",
+        "help": "Requiere la impresora en modo LAN Only. El código de acceso "
+                "está en la pantalla, en Ajustes → Sólo LAN.",
+        "fields": [
+            {"name": "host", "label": "IP de la impresora", "type": "text",
+             "required": True, "placeholder": "192.168.0.223"},
+            {"name": "serial", "label": "Número de serie", "type": "text",
+             "required": True, "placeholder": "se puede autodetectar"},
+            {"name": "code", "label": "Código de acceso", "type": "password",
+             "required": True, "placeholder": "8 caracteres"},
+        ],
+        "discover": True,
+    },
+    "octoprint": {
+        "label": "OctoPrint",
+        "help": "La API key está en OctoPrint, en Ajustes → API, o en "
+                "~/.octoprint/config.yaml bajo 'api: key:'.",
+        "fields": [
+            {"name": "url", "label": "URL de OctoPrint", "type": "text",
+             "required": True, "placeholder": "http://192.168.0.196:5000"},
+            {"name": "api_key", "label": "API key", "type": "password",
+             "required": True, "placeholder": ""},
+        ],
+        "discover": False,
+    },
+}
+
+# Claves que nunca se devuelven a la interfaz.
+_SECRET_FIELDS = {"code", "api_key"}
+
+
+def discover_bambu(timeout: float = 6.0) -> list[dict]:
+    """Escucha el anuncio SSDP que las Bambu emiten al puerto UDP 2021.
+
+    Evita tener que buscar el número de serie a mano: viene en el campo USN,
+    junto con el modelo y la IP.
+    """
+    found: dict[str, dict] = {}
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.bind(("", 2021))
+    except OSError as e:
+        log.warning("no se pudo escuchar SSDP en 2021: %s", e)
+        sock.close()
+        return []
+
+    sock.settimeout(1.0)
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            data, addr = sock.recvfrom(4096)
+        except socket.timeout:
+            continue
+        except OSError:
+            break
+        text = data.decode("utf-8", "replace")
+        if "bambulab" not in text.lower():
+            continue
+        info: dict[str, str] = {}
+        for line in text.splitlines():
+            if ":" in line:
+                k, _, v = line.partition(":")
+                info[k.strip().lower()] = v.strip()
+        serial = info.get("usn")
+        if not serial:
+            continue
+        found[serial] = {
+            "host": addr[0],
+            "serial": serial,
+            "model": info.get("devmodel.bambu.com", ""),
+            "name": info.get("devname.bambu.com", "Bambu Lab"),
+        }
+    sock.close()
+    return list(found.values())
 
 # La Bambu informa el restante en minutos; OctoPrint en segundos.
 _BAMBU_STATES = {
@@ -284,15 +366,69 @@ class PrinterHub:
         self.config_path = Path(config_path)
         self.printers: dict[str, Any] = {}
 
-    def start(self) -> None:
+    # -------- persistencia --------
+    def load_config(self) -> dict:
         if not self.config_path.exists():
-            log.info("sin %s: no hay telemetría de impresoras",
-                     self.config_path)
-            return
+            return {}
         try:
             cfg = json.loads(self.config_path.read_text(encoding="utf-8"))
         except (ValueError, OSError) as e:
             log.warning("no se pudo leer %s: %s", self.config_path, e)
+            return {}
+        # Las claves con guion bajo son comentarios del archivo de ejemplo.
+        return {k: v for k, v in cfg.items()
+                if not k.startswith("_") and isinstance(v, dict)}
+
+    def save_config(self, cfg: dict) -> None:
+        """Escritura atómica, y con permisos cerrados porque lleva secretos."""
+        self.config_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.config_path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(cfg, indent=2, ensure_ascii=False),
+                       encoding="utf-8")
+        os.chmod(tmp, 0o600)
+        tmp.replace(self.config_path)
+
+    def public_config(self) -> dict:
+        """Config para la interfaz, sin secretos: solo si están puestos."""
+        out = {}
+        for stream, entry in self.load_config().items():
+            item = {k: v for k, v in entry.items() if k not in _SECRET_FIELDS}
+            for secret in _SECRET_FIELDS:
+                if entry.get(secret):
+                    item[f"{secret}_set"] = True
+            out[stream] = item
+        return out
+
+    def upsert(self, stream: str, entry: dict) -> None:
+        """Agrega o actualiza una impresora y reinicia la telemetría.
+
+        Un campo secreto vacío significa "dejar el que ya estaba", para poder
+        editar el resto sin tener que volver a tipear la credencial.
+        """
+        cfg = self.load_config()
+        previous = cfg.get(stream, {})
+        for secret in _SECRET_FIELDS:
+            if not entry.get(secret) and previous.get(secret):
+                entry[secret] = previous[secret]
+        cfg[stream] = {k: v for k, v in entry.items() if v not in (None, "")}
+        self.save_config(cfg)
+        self.restart()
+
+    def delete(self, stream: str) -> None:
+        cfg = self.load_config()
+        if cfg.pop(stream, None) is not None:
+            self.save_config(cfg)
+            self.restart()
+
+    def restart(self) -> None:
+        self.stop()
+        self.start()
+
+    # -------- ciclo de vida --------
+    def start(self) -> None:
+        cfg = self.load_config()
+        if not cfg:
+            log.info("sin impresoras configuradas en %s", self.config_path)
             return
 
         for stream, entry in cfg.items():

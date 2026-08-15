@@ -18,7 +18,7 @@ from fastapi.templating import Jinja2Templates
 from .janitor import DiskJanitor
 from .manager import CameraManager
 from .models import CameraIn, Settings
-from .printers import PrinterHub
+from .printers import PROVIDERS, PrinterHub, discover_bambu
 from .storage import Storage
 
 logging.basicConfig(
@@ -79,6 +79,9 @@ async def index(request: Request):
             "settings": settings,
             "disk": _disk_payload(settings),
             "janitor": janitor.state.last_report,
+            "providers": PROVIDERS,
+            "printers": printers.public_config(),
+            "streams": await _go2rtc_stream_names(),
         },
     )
 
@@ -251,6 +254,64 @@ async def api_wall():
     return await asyncio.gather(*(one(n) for n in streams))
 
 
+# ---------------- impresoras ----------------
+
+@app.post("/printers")
+async def upsert_printer(
+    stream: str = Form(...),
+    type: str = Form(...),
+    label: str = Form(""),
+    host: str = Form(""),
+    serial: str = Form(""),
+    code: str = Form(""),
+    url: str = Form(""),
+    api_key: str = Form(""),
+):
+    """Alta o edición de una impresora desde la GUI."""
+    if type not in PROVIDERS:
+        raise HTTPException(status_code=400, detail=f"proveedor desconocido: {type}")
+    stream = stream.strip()
+    if not stream:
+        raise HTTPException(status_code=400, detail="falta el stream")
+
+    values = {"host": host.strip(), "serial": serial.strip(), "code": code.strip(),
+              "url": url.strip().rstrip("/"), "api_key": api_key.strip()}
+    entry = {"type": type, "label": label.strip() or PROVIDERS[type]["label"]}
+    for field in PROVIDERS[type]["fields"]:
+        entry[field["name"]] = values.get(field["name"], "")
+
+    # Un secreto vacío en una edición conserva el anterior; en un alta, falta.
+    existing = printers.load_config().get(stream, {})
+    for field in PROVIDERS[type]["fields"]:
+        name = field["name"]
+        if field.get("required") and not entry[name] and not existing.get(name):
+            raise HTTPException(
+                status_code=400,
+                detail=f"falta '{field['label']}' para {PROVIDERS[type]['label']}")
+
+    await asyncio.to_thread(printers.upsert, stream, entry)
+    return RedirectResponse(url="/", status_code=303)
+
+
+@app.post("/printers/{stream}/delete")
+async def delete_printer(stream: str):
+    await asyncio.to_thread(printers.delete, stream)
+    return RedirectResponse(url="/", status_code=303)
+
+
+@app.get("/api/printers")
+async def api_printers():
+    """Impresoras configuradas y esquema de proveedores. Sin secretos."""
+    return {"providers": PROVIDERS, "configured": printers.public_config()}
+
+
+@app.get("/api/printers/discover")
+async def api_discover_printers():
+    """Busca Bambu en la red para no tener que tipear el serial a mano."""
+    found = await asyncio.to_thread(discover_bambu)
+    return {"bambu": found}
+
+
 @app.get("/api/disk")
 async def api_disk():
     settings = storage.get_settings()
@@ -262,6 +323,21 @@ async def api_disk():
 
 
 # ---------------- helpers ----------------
+
+async def _go2rtc_stream_names() -> list[str]:
+    """Nombres de stream de go2rtc, para elegir a cuál cámara asociar.
+
+    Si go2rtc está caído se devuelve vacío: la GUI ofrece escribirlo a mano.
+    """
+    def fetch() -> dict:
+        with urllib.request.urlopen(f"{GO2RTC_API}/api/streams", timeout=3) as r:
+            return json.load(r)
+
+    try:
+        return sorted(await asyncio.to_thread(fetch))
+    except Exception:  # noqa: BLE001
+        return []
+
 
 def _disk_payload(settings: Settings) -> dict:
     captures_dir = Path(settings.captures_dir).resolve()

@@ -143,6 +143,222 @@
 </section>
 
 <section class="panel">
+  <h2>Impresoras</h2>
+  <p class="muted" style="margin:-4px 0 14px;">
+    Asocia una impresora a una cámara para ver el avance de impresión sobre su
+    video en la <a href="{{ request.url_for('static', path='wall.html') }}">vista
+    de cámaras</a>.
+  </p>
+
+  {% if printers %}
+  <div class="table-wrap">
+    <table style="min-width:720px;">
+      <colgroup>
+        <col style="width:22%"><col style="width:18%"><col style="width:24%">
+        <col style="width:26%"><col style="width:110px">
+      </colgroup>
+      <thead>
+        <tr><th>Cámara</th><th>Proveedor</th><th>Nombre</th>
+            <th>Conexión</th><th></th></tr>
+      </thead>
+      <tbody>
+      {% for stream, p in printers.items() %}
+        <tr>
+          <td><code>{{ stream }}</code></td>
+          <td>{{ providers[p.type].label if p.type in providers else p.type }}</td>
+          <td>{{ p.label or '—' }}</td>
+          <td class="muted">
+            {% if p.type == 'bambu' %}
+              {{ p.host }} · serie {{ p.serial }}
+            {% else %}
+              {{ p.url }}
+            {% endif %}
+          </td>
+          <td>
+            <div class="row-actions">
+              <button type="button" class="btn"
+                      onclick="editPrinter('{{ stream }}')">Editar</button>
+              <form class="inline" method="post"
+                    action="/printers/{{ stream }}/delete"
+                    onsubmit="return confirm('¿Quitar la telemetría de {{ stream }}?');">
+                <button class="btn-danger">Quitar</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">Todavía no hay ninguna impresora asociada.</p>
+  {% endif %}
+
+  <details id="printer-form-wrap" style="margin-top:18px;">
+    <summary id="printer-form-title">Añadir impresora</summary>
+
+    <form method="post" action="/printers" style="margin-top:14px;">
+      <div class="grid">
+        <div>
+          <label>Cámara a la que corresponde</label>
+          {% if streams %}
+          <select name="stream" id="pf-stream" required
+                  style="width:100%;background:var(--bg);color:var(--fg);
+                         border:1px solid var(--line);border-radius:6px;
+                         padding:8px 10px;font-size:14px;font-family:inherit;">
+            {% for s in streams %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+          </select>
+          {% else %}
+          <input type="text" name="stream" id="pf-stream" required
+                 placeholder="nombre del stream en go2rtc">
+          {% endif %}
+        </div>
+        <div>
+          <label>Proveedor</label>
+          <select name="type" id="pf-type" required
+                  style="width:100%;background:var(--bg);color:var(--fg);
+                         border:1px solid var(--line);border-radius:6px;
+                         padding:8px 10px;font-size:14px;font-family:inherit;">
+            {% for key, prov in providers.items() %}
+            <option value="{{ key }}">{{ prov.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label>Nombre a mostrar (opcional)</label>
+          <input type="text" name="label" id="pf-label" placeholder="Bambu Lab H2S">
+        </div>
+      </div>
+
+      <!-- Campos propios de cada proveedor, dibujados desde PROVIDERS -->
+      {% for key, prov in providers.items() %}
+      <div class="prov-fields" data-prov="{{ key }}" hidden style="margin-top:14px;">
+        <p class="muted" style="margin:0 0 10px;">{{ prov.help }}</p>
+        <div class="grid">
+          {% for f in prov.fields %}
+          <div>
+            <label>{{ f.label }}{% if not f.required %} (opcional){% endif %}</label>
+            <input type="{{ 'password' if f.type == 'password' else 'text' }}"
+                   name="{{ f.name }}" data-field="{{ f.name }}"
+                   placeholder="{{ f.placeholder }}"
+                   autocomplete="off">
+          </div>
+          {% endfor %}
+        </div>
+        {% if prov.discover %}
+        <div class="form-actions">
+          <button type="button" class="btn" onclick="discoverBambu(this)">
+            Buscar impresoras en la red
+          </button>
+          <span class="muted" data-discover-msg></span>
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+
+      <p class="muted" id="pf-secret-hint" hidden style="margin:12px 0 0;">
+        Los campos de credenciales se dejan en blanco al editar: si no escribes
+        nada, se conserva la que ya estaba guardada.
+      </p>
+
+      <div class="form-actions">
+        <button class="btn-primary" id="pf-submit">Guardar</button>
+        <button type="button" class="btn" onclick="resetPrinterForm()">Cancelar</button>
+      </div>
+    </form>
+  </details>
+
+  <script>
+    const PRINTERS = {{ printers | tojson }};
+
+    function showProviderFields() {
+      const type = document.getElementById('pf-type').value;
+      document.querySelectorAll('.prov-fields').forEach(el => {
+        const on = el.dataset.prov === type;
+        el.hidden = !on;
+        // Un campo oculto no debe viajar ni bloquear el submit.
+        el.querySelectorAll('input').forEach(i => { i.disabled = !on; });
+      });
+    }
+
+    function resetPrinterForm() {
+      const form = document.querySelector('#printer-form-wrap form');
+      form.reset();
+      document.querySelectorAll('.prov-fields input')
+             .forEach(i => i.placeholder = i.dataset.ph || i.placeholder);
+      document.getElementById('pf-secret-hint').hidden = true;
+      document.getElementById('printer-form-title').textContent = 'Añadir impresora';
+      document.getElementById('pf-submit').textContent = 'Guardar';
+      const stream = document.getElementById('pf-stream');
+      if (stream.tagName === 'SELECT') stream.disabled = false;
+      showProviderFields();
+      document.getElementById('printer-form-wrap').open = false;
+    }
+
+    function editPrinter(stream) {
+      const p = PRINTERS[stream];
+      if (!p) return;
+      const wrap = document.getElementById('printer-form-wrap');
+      wrap.open = true;
+
+      const sel = document.getElementById('pf-stream');
+      sel.value = stream;
+      document.getElementById('pf-type').value = p.type;
+      document.getElementById('pf-label').value = p.label || '';
+      showProviderFields();
+
+      // Rellena lo no secreto; en los secretos avisa que ya hay uno guardado.
+      document.querySelectorAll(`.prov-fields[data-prov="${p.type}"] input`)
+        .forEach(i => {
+          const name = i.dataset.field;
+          if (p[name] !== undefined) {
+            i.value = p[name];
+          } else if (p[name + '_set']) {
+            i.value = '';
+            i.placeholder = '•••••• (guardada, dejar en blanco para conservar)';
+          }
+        });
+
+      document.getElementById('pf-secret-hint').hidden = false;
+      document.getElementById('printer-form-title').textContent =
+        'Editando ' + stream;
+      document.getElementById('pf-submit').textContent = 'Guardar cambios';
+      wrap.scrollIntoView({behavior:'smooth', block:'nearest'});
+    }
+
+    async function discoverBambu(btn) {
+      const msg = btn.parentElement.querySelector('[data-discover-msg]');
+      btn.disabled = true;
+      msg.textContent = 'buscando (puede tardar ~10 s)…';
+      try {
+        const r = await fetch('/api/printers/discover');
+        const d = await r.json();
+        const list = d.bambu || [];
+        if (!list.length) {
+          msg.textContent = 'ninguna encontrada. ¿Está en modo LAN Only?';
+          return;
+        }
+        const p = list[0];
+        const box = document.querySelector('.prov-fields[data-prov="bambu"]');
+        box.querySelector('[data-field="host"]').value = p.host;
+        box.querySelector('[data-field="serial"]').value = p.serial;
+        const label = document.getElementById('pf-label');
+        if (!label.value) label.value = p.name;
+        msg.textContent = `encontrada: ${p.name} (${p.host})` +
+          (list.length > 1 ? ` y ${list.length - 1} más` : '');
+      } catch (e) {
+        msg.textContent = 'error al buscar: ' + e;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    document.getElementById('pf-type').addEventListener('change', showProviderFields);
+    showProviderFields();
+  </script>
+</section>
+
+<section class="panel">
   <h2>Almacenamiento</h2>
   {% set used = disk.used_pct %}
   {% set high = disk.high_watermark_pct %}

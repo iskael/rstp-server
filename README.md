@@ -207,6 +207,11 @@ El servicio actual usa:
 - `GET /api/disk` — uso del disco y último reporte del janitor.
 - `GET /api/wall` — estado de los streams de go2rtc y telemetría de las
   impresoras, para la vista mosaico.
+- `GET /api/printers` — impresoras configuradas y proveedores disponibles,
+  sin exponer credenciales.
+- `GET /api/printers/discover` — busca impresoras Bambu en la red por SSDP.
+- `POST /printers` — alta o edición de una impresora.
+- `POST /printers/{stream}/delete` — quita una impresora.
 - `POST /janitor/run` — ejecuta una pasada del janitor inmediatamente.
 
 ## Vista mosaico (todas las cámaras en una pantalla)
@@ -245,10 +250,27 @@ Cada recuadro puede mostrar el estado de la impresora que enfoca: nombre del
 trabajo, barra de avance, porcentaje, tiempo restante, hora estimada de término,
 capa actual y temperaturas.
 
-Se configura en `data/printers.json` (ver `printers.example.json`). Cada clave
-es el **nombre del stream en go2rtc**, y así la telemetría cae en el recuadro de
-la cámara correspondiente. Ese archivo vive en `data/` porque lleva credenciales
-y `data/` está en `.gitignore`.
+Se configura desde la GUI, en el panel **Impresoras**: se elige la cámara, el
+proveedor, y se completan los campos que ese proveedor pide. Los cambios se
+aplican en caliente, sin reiniciar el servicio. Para las Bambu hay un botón
+**Buscar impresoras en la red** que completa IP y número de serie solo,
+escuchando el anuncio SSDP.
+
+Al editar, los campos de credencial se dejan en blanco para conservar la que ya
+estaba guardada; la API nunca devuelve secretos, solo si están puestos o no.
+
+Por debajo se guarda en `data/printers.json` (ver `printers.example.json`), que
+también se puede editar a mano. Cada clave es el **nombre del stream en
+go2rtc**, y así la telemetría cae en el recuadro de la cámara correspondiente.
+Ese archivo vive en `data/` porque lleva credenciales y `data/` está en
+`.gitignore`; se escribe de forma atómica y con permisos `600`.
+
+### Agregar un proveedor nuevo
+
+El formulario se dibuja a partir del diccionario `PROVIDERS` de
+`app/printers.py`: nombre, ayuda y lista de campos. Para soportar otra marca
+alcanza con agregar una entrada ahí y una clase con un método `snapshot()` que
+devuelva el mismo diccionario de campos; la GUI se adapta sola.
 
 Orígenes soportados:
 
