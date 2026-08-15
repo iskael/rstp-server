@@ -6,7 +6,7 @@
     "telemetria aparezca en el recuadro de la camara que corresponde."
   ],
 
-  "bambu_x1": {
+  "bambu_h2s": {
     "type": "bambu",
     "host": "192.168.0.223",
     "serial": "SERIAL_DE_LA_IMPRESORA",
