@@ -274,6 +274,9 @@
       </div>
       {% endfor %}
 
+      <p id="pf-ocupada" hidden
+         style="margin:12px 0 0;color:var(--warn);font-size:13px;"></p>
+
       <p class="muted" id="pf-secret-hint" hidden style="margin:12px 0 0;">
         Los campos de credenciales se dejan en blanco al editar: si no escribes
         nada, se conserva la que ya estaba guardada.
@@ -290,6 +293,8 @@
     const PRINTERS = {{ printers | tojson }};
 
     const NEW_STREAM = {{ new_stream_sentinel | tojson }};
+    // Stream que se está editando, o null si es un alta.
+    let editando = null;
 
     function showProviderFields() {
       const type = document.getElementById('pf-type').value;
@@ -332,6 +337,8 @@
     function resetPrinterForm() {
       const form = document.querySelector('#printer-form-wrap form');
       form.reset();
+      editando = null;
+      document.getElementById('pf-ocupada').hidden = true;
       document.querySelectorAll('.prov-fields input')
              .forEach(i => i.placeholder = i.dataset.ph || i.placeholder);
       document.getElementById('pf-secret-hint').hidden = true;
@@ -347,6 +354,7 @@
       if (!p) return;
       const wrap = document.getElementById('printer-form-wrap');
       wrap.open = true;
+      editando = stream;
 
       const sel = document.getElementById('pf-stream');
       sel.value = stream;
@@ -354,6 +362,7 @@
       document.getElementById('pf-label').value = p.label || '';
       showProviderFields();
       showNewCamFields();   // al editar la cámara ya existe
+      avisarSiOcupada();
 
       // Rellena lo no secreto; en los secretos avisa que ya hay uno guardado.
       document.querySelectorAll(`.prov-fields[data-prov="${p.type}"] input`)
@@ -402,9 +411,36 @@
     }
 
     document.getElementById('pf-type').addEventListener('change', showProviderFields);
-    document.getElementById('pf-stream').addEventListener('change', showNewCamFields);
+    document.getElementById('pf-stream').addEventListener('change', () => {
+      showNewCamFields();
+      avisarSiOcupada();
+    });
+
+    // Elegir una cámara que ya tiene impresora sobrescribe su configuración.
+    // Se avisa al elegirla y se vuelve a confirmar al guardar.
+    function avisarSiOcupada() {
+      const stream = document.getElementById('pf-stream').value;
+      const ocupada = PRINTERS[stream] && stream !== editando;
+      const aviso = document.getElementById('pf-ocupada');
+      aviso.hidden = !ocupada;
+      if (ocupada) {
+        aviso.textContent =
+          `Ojo: «${stream}» ya tiene asociada «${PRINTERS[stream].label ||
+           PRINTERS[stream].type}». Al guardar se reemplaza.`;
+      }
+    }
+
+    document.querySelector('#printer-form-wrap form').addEventListener('submit', ev => {
+      const stream = document.getElementById('pf-stream').value;
+      if (PRINTERS[stream] && stream !== editando &&
+          !confirm(`«${stream}» ya tiene una impresora asociada.\n\n` +
+                   `¿Reemplazar su configuración?`)) {
+        ev.preventDefault();
+      }
+    });
     showProviderFields();
     showNewCamFields();
+    avisarSiOcupada();
   </script>
 </section>
 
