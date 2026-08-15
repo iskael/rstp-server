@@ -181,6 +181,9 @@
       button, .btn, .copy-btn, .open-btn { width: 100%; text-align: center; }
       .preview { width: 168px; height: 102px; }
     }
+    .header-right { display: flex; align-items: center; gap: 14px;
+                    flex-wrap: wrap; justify-content: flex-end; }
+    .wall-link { width: auto; white-space: nowrap; font-weight: 600; }
   </style>
   <script>
     function togglePreview(camId, btn) {
@@ -219,7 +222,12 @@
 <body>
   <header>
     <h1>rstp-server</h1>
-    <div class="muted">re-streamer RTSP → HTTP MJPEG</div>
+    <div class="header-right">
+      <div class="muted">re-streamer RTSP → HTTP MJPEG</div>
+      <a class="btn btn-primary wall-link"
+         href="{{ request.url_for('static', path='wall.html') }}">
+        ▦ Ver todas las cámaras</a>
+    </div>
   </header>
   <main>
     {% block content %}{% endblock %}

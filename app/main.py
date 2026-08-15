@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import os
 import shutil
+import urllib.parse
+import urllib.request
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -23,6 +27,7 @@ logging.basicConfig(
 log = logging.getLogger("rstp-server")
 
 DB_PATH = os.environ.get("RSTP_DB", "./data/cameras.db")
+GO2RTC_API = os.environ.get("GO2RTC_API", "http://127.0.0.1:1984")
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -192,6 +197,48 @@ async def api_list_cameras():
         }
         for cam in cams
     ]
+
+
+@app.get("/api/wall")
+async def api_wall():
+    """Estado de los streams de go2rtc para la vista /static/wall.html.
+
+    Consulta a go2rtc desde el servidor y devuelve solo lo necesario para
+    pintar el estado. Nunca expone las URLs RTSP, porque llevan las
+    credenciales de las cámaras y esta API no tiene autenticación.
+    """
+    def fetch(url: str) -> dict:
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            return json.load(resp)
+
+    try:
+        streams = await asyncio.to_thread(fetch, f"{GO2RTC_API}/api/streams")
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"go2rtc no responde: {e}")
+
+    async def one(name: str) -> dict:
+        item = {"name": name, "connected": False, "bytes_recv": 0, "codec": None}
+        try:
+            src = urllib.parse.quote(name, safe="")
+            detail = await asyncio.to_thread(
+                fetch, f"{GO2RTC_API}/api/streams?src={src}")
+        except Exception:  # noqa: BLE001
+            return item
+        producers = detail.get("producers") or []
+        # Sin consumidores go2rtc no abre la cámara: el productor existe pero
+        # viene sin datos. Eso es reposo, no un error.
+        for prod in producers:
+            if prod.get("remote_addr") is None:
+                continue
+            item["connected"] = True
+            item["bytes_recv"] = prod.get("bytes_recv") or 0
+            receivers = prod.get("receivers") or []
+            if receivers:
+                item["codec"] = (receivers[0].get("codec") or {}).get("codec_name")
+            break
+        return item
+
+    return await asyncio.gather(*(one(n) for n in streams))
 
 
 @app.get("/api/disk")

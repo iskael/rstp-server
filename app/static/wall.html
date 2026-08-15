@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Impresoras 3D — Vista de cámaras</title>
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#14181d; --line:#232a32;
+    --txt:#e7edf3; --dim:#8b97a5;
+    --ok:#3ddc84; --warn:#f5a524; --err:#f04747;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  header{
+    display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+    padding:14px 18px;border-bottom:1px solid var(--line);background:var(--panel);
+    position:sticky;top:0;z-index:10;
+  }
+  h1{font-size:17px;margin:0;font-weight:600;letter-spacing:.2px}
+  .spacer{flex:1}
+  .pill{font-size:12px;color:var(--dim);border:1px solid var(--line);
+    border-radius:999px;padding:4px 10px;white-space:nowrap}
+  button{
+    background:#1e252d;color:var(--txt);border:1px solid var(--line);
+    border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;font-family:inherit;
+  }
+  button:hover{background:#262f39}
+
+  #grid{
+    display:grid;gap:12px;padding:12px;
+    grid-template-columns:repeat(auto-fit,minmax(400px,1fr));
+  }
+  #grid.cols-1{grid-template-columns:1fr}
+
+  .tile{
+    position:relative;background:#000;border:1px solid var(--line);
+    border-radius:12px;overflow:hidden;aspect-ratio:16/9;
+  }
+  .tile iframe{width:100%;height:100%;border:0;display:block;background:#000}
+
+  .bar{
+    position:absolute;left:0;right:0;top:0;padding:9px 12px;
+    display:flex;align-items:center;gap:9px;
+    background:linear-gradient(180deg,rgba(0,0,0,.75),rgba(0,0,0,0));
+    pointer-events:none;
+  }
+  .name{font-size:13px;font-weight:600;text-shadow:0 1px 3px #000}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--dim);flex:none;
+    box-shadow:0 0 0 3px rgba(0,0,0,.35)}
+  .dot.live{background:var(--ok);animation:pulse 2.2s ease-in-out infinite}
+  .dot.off{background:var(--err)}
+  .dot.wait{background:var(--warn)}
+  @keyframes pulse{50%{opacity:.35}}
+  .meta{font-size:11px;color:#c7d2de;text-shadow:0 1px 3px #000;margin-left:auto;
+    font-variant-numeric:tabular-nums}
+
+  .acts{
+    position:absolute;right:8px;bottom:8px;display:flex;gap:6px;
+    opacity:0;transition:opacity .15s;
+  }
+  .tile:hover .acts{opacity:1}
+  .acts button{padding:5px 9px;font-size:12px;background:rgba(15,20,26,.85)}
+
+  .down{
+    position:absolute;inset:0;display:none;flex-direction:column;
+    align-items:center;justify-content:center;gap:6px;text-align:center;padding:20px;
+    background:repeating-linear-gradient(45deg,#0e1216,#0e1216 12px,#121820 12px,#121820 24px);
+  }
+  .tile.is-down .down{display:flex}
+  .tile.is-down iframe{visibility:hidden}
+  .down b{font-size:14px;color:#dbe4ee}
+  .down span{font-size:12px;color:var(--dim);max-width:34ch;line-height:1.5}
+
+  footer{padding:12px 18px 26px;color:var(--dim);font-size:12px;
+    border-top:1px solid var(--line);margin-top:6px;line-height:1.7}
+  footer a{color:#7fb2ff;text-decoration:none}
+  footer a:hover{text-decoration:underline}
+
+  @media (max-width:640px){
+    #grid{grid-template-columns:1fr;padding:8px;gap:8px}
+    header{padding:11px 13px}
+    .acts{opacity:1}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Impresoras 3D</h1>
+  <span class="pill" id="summary">cargando…</span>
+  <span class="spacer"></span>
+  <span class="pill" id="clock"></span>
+  <button id="btnCols">1 columna</button>
+  <button id="btnReload">Recargar</button>
+</header>
+
+<div id="grid"></div>
+
+<footer>
+  Streams servidos por <a href="/" target="_blank">go2rtc</a> en
+  <span id="hostinfo"></span> — WebRTC sin transcodificar, con fallback automático
+  a MSE/MJPEG.<br>
+  Panel de go2rtc: <a id="lnkG" target="_blank">:1984</a> ·
+  Administración de cámaras MJPEG: <a id="lnkR" target="_blank">:8080</a>
+</footer>
+
+<script>
+// go2rtc corre en el mismo host que esta página, puerto 1984.
+const GO2RTC = `${location.protocol}//${location.hostname}:1984`;
+
+// Nombres lindos para los streams definidos en go2rtc.yaml.
+// Si aparece un stream nuevo, se muestra igual con su nombre crudo.
+const LABELS = {
+  bambu_x1: 'Bambu Lab X1',
+  eufy:     'Eufy — Impresora',
+  wyze:     'Wyze',
+};
+
+const grid = document.getElementById('grid');
+const tiles = new Map();   // nombre -> {el, dot, meta, lastBytes, lastChange}
+
+function tileFor(name){
+  const el = document.createElement('div');
+  el.className = 'tile';
+  el.innerHTML = `
+    <iframe allowfullscreen allow="autoplay; fullscreen"
+            src="${GO2RTC}/stream.html?src=${encodeURIComponent(name)}&background=true"></iframe>
+    <div class="down">
+      <b>Sin señal</b>
+      <span data-why>No se puede conectar con la cámara.</span>
+    </div>
+    <div class="bar">
+      <span class="dot wait"></span>
+      <span class="name">${LABELS[name] || name}</span>
+      <span class="meta"></span>
+    </div>
+    <div class="acts">
+      <button data-act="full">Pantalla completa</button>
+      <button data-act="reload">↻</button>
+    </div>`;
+
+  el.querySelector('[data-act=full]').onclick = () => {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else el.requestFullscreen?.();
+  };
+  el.querySelector('[data-act=reload]').onclick = () => {
+    const f = el.querySelector('iframe');
+    f.src = f.src;   // fuerza reconexión
+  };
+
+  grid.appendChild(el);
+  const t = {el, dot:el.querySelector('.dot'), meta:el.querySelector('.meta'),
+             why:el.querySelector('[data-why]'), lastBytes:-1, lastChange:Date.now()};
+  tiles.set(name, t);
+  return t;
+}
+
+function fmtBps(b){
+  if (b > 1e6) return (b/1e6).toFixed(1)+' MB/s';
+  if (b > 1e3) return (b/1e3).toFixed(0)+' kB/s';
+  return b+' B/s';
+}
+
+async function poll(){
+  // El estado se pide a nuestra propia app (mismo origen), que consulta a
+  // go2rtc del lado del servidor. Así el navegador nunca recibe las URLs
+  // RTSP con las credenciales de las cámaras.
+  let data;
+  try {
+    const r = await fetch('/api/wall', {cache:'no-store'});
+    if (!r.ok) throw new Error(r.status);
+    data = await r.json();
+  } catch (e) {
+    document.getElementById('summary').textContent = 'go2rtc no responde';
+    return;
+  }
+
+  // Crear tiles para streams nuevos, respetando el orden del config.
+  for (const s of data) if (!tiles.has(s.name)) tileFor(s.name);
+
+  let live = 0;
+  const total = data.length;
+
+  await Promise.all(data.map(async s => {
+    const name = s.name;
+    const t = tiles.get(name);
+    const bytes = s.connected ? (s.bytes_recv || 0) : -1;
+
+    if (bytes < 0){
+      // Sin productor: go2rtc todavía no logró abrir la cámara.
+      t.dot.className = 'dot wait';
+      t.meta.textContent = 'conectando…';
+      // Si lleva mucho sin lograrlo, lo damos por caído.
+      if (Date.now() - t.lastChange > 25000){
+        t.el.classList.add('is-down');
+        t.dot.className = 'dot off';
+        t.meta.textContent = 'sin señal';
+      }
+    } else {
+      const delta = t.lastBytes >= 0 ? bytes - t.lastBytes : 0;
+      if (bytes !== t.lastBytes){ t.lastChange = Date.now(); }
+      t.lastBytes = bytes;
+
+      if (delta > 0){
+        live++;
+        t.el.classList.remove('is-down');
+        t.dot.className = 'dot live';
+        t.meta.textContent = `${(s.codec||'').toUpperCase()} · ${fmtBps(delta/POLL_S)}`;
+      } else if (Date.now() - t.lastChange > 12000){
+        t.el.classList.add('is-down');
+        t.dot.className = 'dot off';
+        t.meta.textContent = 'sin datos';
+        t.why.textContent = 'La cámara aceptó la conexión pero dejó de enviar video.';
+      }
+    }
+  }));
+
+  document.getElementById('summary').textContent =
+    `${live} de ${total} en vivo`;
+}
+
+const POLL_S = 5;
+document.getElementById('hostinfo').textContent = location.hostname;
+document.getElementById('lnkG').href = GO2RTC;
+document.getElementById('lnkR').href = `${location.protocol}//${location.hostname}:8080`;
+
+document.getElementById('btnCols').onclick = e => {
+  grid.classList.toggle('cols-1');
+  e.target.textContent = grid.classList.contains('cols-1') ? 'Mosaico' : '1 columna';
+};
+document.getElementById('btnReload').onclick = () =>
+  document.querySelectorAll('#grid iframe').forEach(f => f.src = f.src);
+
+setInterval(() => {
+  document.getElementById('clock').textContent =
+    new Date().toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}, 1000);
+
+poll();
+setInterval(poll, POLL_S * 1000);
+</script>
+</body>
+</html>

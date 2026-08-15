@@ -205,7 +205,46 @@ El servicio actual usa:
 
 - `GET /api/cameras` — listado JSON de cámaras y estado.
 - `GET /api/disk` — uso del disco y último reporte del janitor.
+- `GET /api/wall` — estado de los streams de go2rtc para la vista mosaico.
 - `POST /janitor/run` — ejecuta una pasada del janitor inmediatamente.
+
+## Vista mosaico (todas las cámaras en una pantalla)
+
+`/static/wall.html` muestra todas las cámaras a la vez, con nombre, semáforo de
+estado, codec y bitrate. Hay un enlace directo en la cabecera de la GUI.
+
+Esta vista **no usa los streams MJPEG de este servidor**: se apoya en
+[go2rtc](https://github.com/AlexxIT/go2rtc), que corre al lado en el puerto
+`1984` y entrega el H.264 por WebRTC **sin transcodificar**. Un `ffmpeg` de este
+servidor consume ~20% de CPU por cámara; go2rtc se queda en ~1% con varias
+cámaras en vivo, y solo se conecta a la cámara cuando alguien está mirando.
+
+Cada recuadro es un `iframe` al reproductor propio de go2rtc
+(`/stream.html?src=<nombre>`), que negocia WebRTC y cae solo a MSE o MJPEG si
+hace falta.
+
+### Por qué el estado pasa por `/api/wall`
+
+`GET /api/streams` de go2rtc devuelve las URLs RTSP **con las credenciales de
+las cámaras**. Para que el navegador no las reciba nunca, la vista no consulta a
+go2rtc directamente: pide el estado a `/api/wall` de este servidor, que hace la
+consulta del lado del servidor y devuelve solo `name`, `connected`,
+`bytes_recv` y `codec`.
+
+Por lo mismo, **go2rtc no debe quedar con `api.origin: "*"`**: eso permitiría a
+cualquier web abierta en el navegador leer esas credenciales. go2rtc solo acepta
+`"*"` o nada, así que la opción correcta es no ponerla.
+
+La URL de go2rtc se puede cambiar con la variable de entorno `GO2RTC_API`
+(por defecto `http://127.0.0.1:1984`).
+
+### Una sola conexión por cámara
+
+Varias cámaras baratas (las Wyze con firmware RTSP, entre otras) aceptan **un
+solo cliente RTSP** y su servicio se cae si reciben dos. Si una cámara va a estar
+en go2rtc y además en este servidor, conviene que este servidor la lea *desde*
+go2rtc y no de la cámara: usar `rtsp://127.0.0.1:8554/<nombre>` como URL RTSP.
+Así la cámara ve un único cliente.
 
 ## Seguridad y operación
 
