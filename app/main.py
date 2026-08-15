@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shutil
 import urllib.parse
 import urllib.request
@@ -32,6 +33,9 @@ GO2RTC_API = os.environ.get("GO2RTC_API", "http://127.0.0.1:1984")
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+# Valor del desplegable de cámaras que significa "crear una nueva".
+NEW_STREAM_SENTINEL = "__new__"
 
 PRINTERS_CONFIG = os.environ.get(
     "PRINTERS_CONFIG", str(Path(DB_PATH).parent / "printers.json"))
@@ -82,6 +86,7 @@ async def index(request: Request):
             "providers": PROVIDERS,
             "printers": printers.public_config(),
             "streams": await _go2rtc_stream_names(),
+            "new_stream_sentinel": NEW_STREAM_SENTINEL,
         },
     )
 
@@ -266,11 +271,35 @@ async def upsert_printer(
     code: str = Form(""),
     url: str = Form(""),
     api_key: str = Form(""),
+    new_stream_name: str = Form(""),
+    new_stream_src: str = Form(""),
 ):
-    """Alta o edición de una impresora desde la GUI."""
+    """Alta o edición de una impresora desde la GUI.
+
+    Si se eligió "cámara nueva", primero se crea el stream en go2rtc, para que
+    dar de alta una impresora sea un solo paso.
+    """
     if type not in PROVIDERS:
         raise HTTPException(status_code=400, detail=f"proveedor desconocido: {type}")
+
     stream = stream.strip()
+    if stream == NEW_STREAM_SENTINEL:
+        name = new_stream_name.strip()
+        src = new_stream_src.strip()
+        if not _STREAM_NAME_RE.match(name):
+            raise HTTPException(
+                status_code=400,
+                detail="el nombre de la cámara solo admite letras, números, "
+                       "guion y guion bajo (hasta 40 caracteres)")
+        if not src:
+            raise HTTPException(status_code=400,
+                                detail="falta la URL de la cámara nueva")
+        if name in await _go2rtc_stream_names():
+            raise HTTPException(status_code=400,
+                                detail=f"ya existe una cámara llamada '{name}'")
+        await _go2rtc_add_stream(name, src)
+        stream = name
+
     if not stream:
         raise HTTPException(status_code=400, detail="falta el stream")
 
@@ -323,6 +352,28 @@ async def api_disk():
 
 
 # ---------------- helpers ----------------
+
+_STREAM_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+
+
+async def _go2rtc_add_stream(name: str, src: str) -> None:
+    """Crea el stream en go2rtc. go2rtc lo persiste solo en su go2rtc.yaml."""
+    query = urllib.parse.urlencode({"name": name, "src": src})
+    req = urllib.request.Request(
+        f"{GO2RTC_API}/api/streams?{query}", method="PUT")
+
+    def call() -> None:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            if resp.status >= 300:
+                raise RuntimeError(f"go2rtc respondió {resp.status}")
+
+    try:
+        await asyncio.to_thread(call)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            status_code=502,
+            detail=f"no se pudo crear la cámara en go2rtc: {e}")
+
 
 async def _go2rtc_stream_names() -> list[str]:
     """Nombres de stream de go2rtc, para elegir a cuál cámara asociar.

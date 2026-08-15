@@ -201,17 +201,13 @@
       <div class="grid">
         <div>
           <label>Cámara a la que corresponde</label>
-          {% if streams %}
           <select name="stream" id="pf-stream" required
                   style="width:100%;background:var(--bg);color:var(--fg);
                          border:1px solid var(--line);border-radius:6px;
                          padding:8px 10px;font-size:14px;font-family:inherit;">
             {% for s in streams %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+            <option value="{{ new_stream_sentinel }}">+ cámara nueva…</option>
           </select>
-          {% else %}
-          <input type="text" name="stream" id="pf-stream" required
-                 placeholder="nombre del stream en go2rtc">
-          {% endif %}
         </div>
         <div>
           <label>Proveedor</label>
@@ -228,6 +224,28 @@
           <label>Nombre a mostrar (opcional)</label>
           <input type="text" name="label" id="pf-label" placeholder="Bambu Lab H2S">
         </div>
+      </div>
+
+      <!-- Alta de la cámara en go2rtc, en el mismo paso -->
+      <div id="new-cam" hidden style="margin-top:14px;">
+        <div class="grid">
+          <div>
+            <label>Nombre de la cámara nueva</label>
+            <input type="text" name="new_stream_name" id="pf-new-name"
+                   placeholder="impresora_taller" autocomplete="off">
+          </div>
+          <div style="grid-column:span 2;">
+            <label>URL de la cámara (RTSP)</label>
+            <input type="text" name="new_stream_src" id="pf-new-src"
+                   placeholder="rtsp://usuario:clave@192.168.0.50/live"
+                   autocomplete="off">
+          </div>
+        </div>
+        <p class="muted" id="pf-bambu-cam-hint" hidden style="margin:10px 0 0;">
+          Las Bambu sirven su propia cámara. Con la IP y el código de acceso
+          cargados más abajo,
+          <a href="#" onclick="fillBambuCam(event)">se arma la URL sola</a>.
+        </p>
       </div>
 
       <!-- Campos propios de cada proveedor, dibujados desde PROVIDERS -->
@@ -271,6 +289,8 @@
   <script>
     const PRINTERS = {{ printers | tojson }};
 
+    const NEW_STREAM = {{ new_stream_sentinel | tojson }};
+
     function showProviderFields() {
       const type = document.getElementById('pf-type').value;
       document.querySelectorAll('.prov-fields').forEach(el => {
@@ -279,6 +299,34 @@
         // Un campo oculto no debe viajar ni bloquear el submit.
         el.querySelectorAll('input').forEach(i => { i.disabled = !on; });
       });
+      document.getElementById('pf-bambu-cam-hint').hidden = (type !== 'bambu');
+    }
+
+    function showNewCamFields() {
+      const nueva = document.getElementById('pf-stream').value === NEW_STREAM;
+      const box = document.getElementById('new-cam');
+      box.hidden = !nueva;
+      box.querySelectorAll('input').forEach(i => {
+        i.disabled = !nueva;
+        i.required = nueva;
+      });
+    }
+
+    // La Bambu sirve su camara por RTSPS con el mismo codigo de acceso.
+    function fillBambuCam(ev) {
+      ev.preventDefault();
+      const box = document.querySelector('.prov-fields[data-prov="bambu"]');
+      const host = box.querySelector('[data-field="host"]').value.trim();
+      const code = box.querySelector('[data-field="code"]').value.trim();
+      if (!host || !code) {
+        alert('Primero completá la IP y el código de acceso de la impresora ' +
+              '(el botón "Buscar impresoras en la red" completa la IP).');
+        return;
+      }
+      document.getElementById('pf-new-src').value =
+        `rtsps://bblp:${code}@${host}:322/streaming/live/1`;
+      const nombre = document.getElementById('pf-new-name');
+      if (!nombre.value) nombre.value = 'bambu';
     }
 
     function resetPrinterForm() {
@@ -289,9 +337,8 @@
       document.getElementById('pf-secret-hint').hidden = true;
       document.getElementById('printer-form-title').textContent = 'Añadir impresora';
       document.getElementById('pf-submit').textContent = 'Guardar';
-      const stream = document.getElementById('pf-stream');
-      if (stream.tagName === 'SELECT') stream.disabled = false;
       showProviderFields();
+      showNewCamFields();
       document.getElementById('printer-form-wrap').open = false;
     }
 
@@ -306,6 +353,7 @@
       document.getElementById('pf-type').value = p.type;
       document.getElementById('pf-label').value = p.label || '';
       showProviderFields();
+      showNewCamFields();   // al editar la cámara ya existe
 
       // Rellena lo no secreto; en los secretos avisa que ya hay uno guardado.
       document.querySelectorAll(`.prov-fields[data-prov="${p.type}"] input`)
@@ -354,7 +402,9 @@
     }
 
     document.getElementById('pf-type').addEventListener('change', showProviderFields);
+    document.getElementById('pf-stream').addEventListener('change', showNewCamFields);
     showProviderFields();
+    showNewCamFields();
   </script>
 </section>
 

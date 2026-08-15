@@ -251,7 +251,18 @@ trabajo, barra de avance, porcentaje, tiempo restante, hora estimada de término
 capa actual y temperaturas.
 
 Se configura desde la GUI, en el panel **Impresoras**: se elige la cámara, el
-proveedor, y se completan los campos que ese proveedor pide. Los cambios se
+proveedor, y se completan los campos que ese proveedor pide. El desplegable de
+cámaras se llena solo con los streams que tenga go2rtc en ese momento.
+
+Si la cámara todavía no existe, se elige **«+ cámara nueva…»** y se dan nombre y
+URL RTSP en el mismo formulario: al guardar se crea el stream en go2rtc (que lo
+persiste en su propio `go2rtc.yaml`) y la telemetría, en un solo paso. Para las
+Bambu hay un atajo que arma la URL RTSPS sola a partir de la IP y el código de
+acceso, que son los mismos datos que ya pide la telemetría.
+
+Quitar una impresora **no borra la cámara**: el video sigue en la vista, solo
+deja de mostrarse el avance de impresión. Para sacar la cámara se usa la
+interfaz de go2rtc. Los cambios se
 aplican en caliente, sin reiniciar el servicio. Para las Bambu hay un botón
 **Buscar impresoras en la red** que completa IP y número de serie solo,
 escuchando el anuncio SSDP.
